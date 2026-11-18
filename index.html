@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  SIS-MEDIA-COMISIONES-APP · V1.2 · 18 de noviembre de 2026
+  SIS-MEDIA-COMISIONES-APP · V1.3 · 18 de noviembre de 2026
   Consolidado para las comisiones de evaluación y promoción · Ciclo V · Colegio Acacia II IED
   Autor: Eliot Manrique · Docente de Educación Media. Se publica como index.html (GitHub Pages).
   Qué hace: el director de grupo carga el consolidado de notas de Apoyo Escolar (.xlsx) y ve su grupo:
@@ -9,15 +9,15 @@
   Reglas: Manual de Convivencia, Arts. 7.3.1 (promedio de los 4 periodos), 7.3.3 (3 o más perdidas)
   y 7.10.2 (prueba de suficiencia). Redondeo normal a una décima (decisión del 18/11/2026).
   Sigue NOR-MEDIA-ESTANDAR-SCRIPTS: lo único que se edita es la sección 1 (AJUSTES), justo abajo.
-  Novedades V1.2: pestañas Reconocimientos (candidatos, Art. 2.4.2), Alertas (caídas, pérdidas persistentes,
-  proyección) y Grado (comparación entre grupos, mejor curso). V1.1: cuadro para la comisión. V1.0: crédito.
+  Novedades V1.3: Reconocimientos con filtros por periodo, tipo y alcance; sin promoción anticipada.
+  V1.2: Reconocimientos, Alertas y Grado. V1.1: cuadro para la comisión. V1.0: crédito del autor.
 -->
 <html lang="es">
 <head>
     <!-- ═══════════════ 1. AJUSTES (lo único que se edita a mano) ═══════════════ -->
     <script>
         const CONFIG = Object.freeze({
-            VERSION: '1.2',                              // versión de este archivo (dos números)
+            VERSION: '1.3',                              // versión de este archivo (dos números)
             CODIGO_SIS: 'SIS-MEDIA-COMISIONES-APP',
             PERIODOS: ['P1', 'P2', 'P3', 'P4'],          // periodos que promedian (Art. 7.3.1)
             MINIMO10: 30,                                // nota mínima para aprobar, en décimas (3,0)
@@ -752,7 +752,7 @@ function ranking_(items, top) {
 
 /** Candidatos de un conjunto de grupos para un periodo (k = 0…3) o para el año (k = 'ANIO'). */
 function candidatos(grupos, periodos, cfg, k, top) {
-    const items = [], esfuerzo = [], promocion = [];
+    const items = [], esfuerzo = [];
     grupos.forEach(g => {
         const R = evaluarGrupo(g, periodos, cfg);
         R.ev.forEach(x => {
@@ -772,11 +772,9 @@ function candidatos(grupos, periodos, cfg, k, top) {
                 if (sube.num > 0) esfuerzo.push(Object.assign({ valor: sube, desde, hasta, antes: a, despues: b, completo: a.completo && b.completo,
                     perdidas: k === 'ANIO' ? x.perdidas.length : b.perdidas }, base));
             }
-            if (k === 'ANIO' && pr && pr.completo && pr.cuenta.SUPERIOR === pr.n) promocion.push(Object.assign({ valor: pr }, base));
         });
     });
-    return { mejores: ranking_(items, top), esfuerzo: ranking_(esfuerzo, top), promocion,
-        aplicaPromocion: grupos.every(g => !/^11/.test(String(g.grupo))) };
+    return { mejores: ranking_(items, top), esfuerzo: ranking_(esfuerzo, top) };
 }
 
 function ultimoPeriodo_(est, asignaturas, periodos) {
@@ -883,7 +881,7 @@ const P = CONFIG.PERIODOS;
 const $ = s => document.querySelector(s);
 const E = {               // estado de la página: solo en memoria
     grupos: [], gi: -1, tab: 'resumen', filtro: 'TODOS', orden: 'estado', busqueda: '',
-    sim: {}, fichaN: null, simular: false, asigAbierta: null, periodoAbierto: null, periodoCuadro: null, periodoRec: null, periodoProy: null
+    sim: {}, fichaN: null, simular: false, asigAbierta: null, periodoAbierto: null, periodoCuadro: null, periodoRec: null, periodoProy: null, tipoRec: null, alcanceRec: null
 };
 
 /** h('div', {class:'x', onclick: f}, 'texto', nodo…): todo texto entra como texto, nunca como HTML. */
@@ -959,7 +957,7 @@ function mostrarGrupos(nombreArchivo) {
 }
 
 function elegirGrupo(i) {
-    E.gi = i; E.tab = 'resumen'; E.periodoCuadro = null; E.periodoRec = null; E.periodoProy = null; E.filtro = 'TODOS'; E.busqueda = ''; E.asigAbierta = null; E.periodoAbierto = null;
+    E.gi = i; E.tab = 'resumen'; E.periodoCuadro = null; E.periodoRec = null; E.periodoProy = null; E.tipoRec = null; E.alcanceRec = null; E.filtro = 'TODOS'; E.busqueda = ''; E.asigAbierta = null; E.periodoAbierto = null;
     $('#vistaCarga').hidden = true; $('#vistaGrupos').hidden = true; $('#vistaGrupo').hidden = false;
     const sel = $('#selGrupo');
     sel.replaceChildren(...E.grupos.map((g, k) => h('option', { value: k }, 'Grupo ' + g.grupo)));
@@ -1198,56 +1196,58 @@ const tablaSimple = (encab, filas, vacio) => h('div', { class: 'tabla-caja' }, h
 function vistaReconocimientos(g, R) {
     const det = periodoDetectado(g, P);
     if (E.periodoRec === null) E.periodoRec = det === P.length - 1 ? 'ANIO' : Math.max(det, 0);
-    const k = E.periodoRec, nomK = k === 'ANIO' ? 'el año' : 'el ' + P[k], top = CONFIG.TOP_RECONOCIMIENTOS;
-    const c = candidatos([g], P, CONFIG, k, top);
-    const varios = E.grupos.length > 1, cg = varios ? candidatos(E.grupos, P, CONFIG, k, top) : null;
+    const varios = E.grupos.length > 1;
+    if (!E.tipoRec || (E.tipoRec === 'CURSO' && !varios)) E.tipoRec = 'EXCELENCIA';
+    if (!E.alcanceRec || !varios) E.alcanceRec = 'GRUPO';
+    const k = E.periodoRec, tipo = E.tipoRec, grado = E.alcanceRec === 'GRADO' && tipo !== 'CURSO';
+    const nomK = k === 'ANIO' ? 'el año' : 'el ' + P[k], top = CONFIG.TOP_RECONOCIMIENTOS;
+    const fila = (etiqueta, ops, actual, alCambiar) => h('div', { class: 'controles' }, h('span', { class: 'sub', style: 'min-width:92px' }, etiqueta),
+        ops.map(([v, t]) => h('button', { class: 'filtro' + (v === actual ? ' activo' : ''), onclick: () => { alCambiar(v); pintar(); } }, t)));
+    const filtros = h('div', { class: 'tarjeta' },
+        fila('Periodo:', P.map((p, i) => [i, p]).concat([['ANIO', 'Año']]), k, v => { E.periodoRec = v; }),
+        fila('Reconocimiento:', [['EXCELENCIA', 'Excelencia académica'], ['ESFUERZO', 'Esfuerzo personal']].concat(varios ? [['CURSO', 'Mejor curso']] : []), tipo, v => { E.tipoRec = v; }),
+        varios && tipo !== 'CURSO' ? fila('Alcance:', [['GRUPO', 'Grupo ' + g.grupo], ['GRADO', `Grado (${E.grupos.length} grupos del archivo)`]], E.alcanceRec, v => { E.alcanceRec = v; }) : null);
 
-    const criterios = h('div', { class: 'tarjeta' }, h('h2', null, 'De dónde salen los candidatos'),
-        h('ul', { class: 'hallazgos' },
-            h('li', null, h('b', null, 'Excelencia académica: '), `los ${top} mejores promedios. En un periodo, el promedio de las notas de ese periodo en todas las asignaturas; en el año, el promedio de los PF. Los empates exactos quedan en el mismo puesto.`),
-            h('li', null, h('b', null, 'Esfuerzo personal: '), `los ${top} que más subieron su promedio frente al periodo anterior; en el año, del primer al último periodo con notas.`),
-            h('li', null, h('b', null, 'Promoción anticipada (solo año, de 1° a 10°): '), 'Superior (4,6 o más) en el PF de todas las asignaturas. El Manual también exige excelencia en convivencia, que no está en este archivo.'),
-            h('li', null, h('b', null, 'Rendimiento académico y convivencia: '), 'el Manual no da un criterio numérico y la convivencia no está en las notas: los define la comisión.'),
-            h('li', null, 'El Manual no excluye a quien tiene asignaturas perdidas o notas incompletas: aparecen con un aviso para que la comisión lo tenga en cuenta.')),
+    const CRITERIO = {
+        EXCELENCIA: [`Los ${top} mejores promedios. En un periodo, el promedio de las notas de ese periodo en todas las asignaturas; en el año, el promedio de los PF. Los empates exactos quedan en el mismo puesto.`,
+            'En el año, la lista del grado sirve para la medalla excelencia de excelencias y la del grupo para la medalla a la excelencia; el Manual también pide liderazgo y vivencia de valores, que valora la comisión.'],
+        ESFUERZO: [`Los ${top} que más subieron su promedio frente al periodo anterior; en el año, del primer al último periodo con notas.`,
+            'Es una forma de proponer candidatos con datos: el esfuerzo también se ve en clase, y eso lo valora la comisión.'],
+        CURSO: ['Promedio de los promedios de sus estudiantes y cuántos no tienen asignaturas perdidas. Solo compara los grupos que trae el archivo.',
+            'El Manual pide elegirlo «a nivel académico y convivencial» (Art. 2.6.1): la convivencia la valora la comisión.']
+    };
+    const criterio = h('div', { class: 'tarjeta' }, h('h2', null, 'De dónde salen los candidatos'),
+        h('ul', { class: 'hallazgos' }, CRITERIO[tipo].map(t => h('li', null, t)),
+            tipo !== 'CURSO' ? h('li', null, 'El Manual no excluye a quien tiene asignaturas perdidas o notas incompletas: aparecen con un aviso para que la comisión lo tenga en cuenta.') : null,
+            h('li', null, 'Rendimiento académico y convivencia: el Manual no da un criterio numérico y la convivencia no está en las notas; los define la comisión.')),
         h('p', { class: 'nota-legal', style: 'margin:8px 0 0' }, 'Los reconocimientos y medallas los otorga únicamente la Comisión de Evaluación y Promoción, a criterio de sus integrantes (Manual de Convivencia, Art. 2.4.2, parágrafo). Esta lista es un apoyo, no una decisión.'));
 
-    const tablaMejores = (lista, conGrupo) => {
-        const tx = textoPromedios(lista, 'valor');
-        return tablaSimple(['Puesto'].concat(conGrupo ? ['Grupo'] : [], ['N.º', 'Estudiante', { t: 'Promedio', c: 'c' }, 'Desempeños (asignaturas)', { t: 'Nota más baja', c: 'c' }],
-            k === 'ANIO' ? [{ t: 'Último periodo', c: 'c' }] : [], ['Avisos']),
-            lista.map((x, i) => h('tr', conGrupo ? null : { class: 'clic', onclick: () => abrirFicha(x.n) },
-                h('td', { class: 'num' }, x.puesto), conGrupo ? h('td', null, x.grupo) : null, h('td', { class: 'num' }, x.n), h('td', null, x.nombre),
-                h('td', { class: 'num' }, h('b', null, tx[i])), h('td', null, cuentaDesemp(x.valor.cuenta)), h('td', { class: 'num' }, f100(x.valor.minimo)),
-                k === 'ANIO' ? h('td', { class: 'num' }, x.ultimo ? `${x.ultimo.periodo} ${coma(valorFr_(x.ultimo), 2)}` : '—') : null,
-                h('td', null, avisosCandidato(x, x.valor)))), 'Nadie tiene notas en este periodo.');
-    };
-    const tablaEsfuerzo = (lista, conGrupo) => {
-        const tx = textoPromedios(lista, 'valor');
-        return tablaSimple(['Puesto'].concat(conGrupo ? ['Grupo'] : [], ['N.º', 'Estudiante', { t: 'Antes', c: 'c' }, { t: 'Después', c: 'c' }, { t: 'Subió', c: 'c' }, 'Avisos']),
-            lista.map((x, i) => h('tr', conGrupo ? null : { class: 'clic', onclick: () => abrirFicha(x.n) },
-                h('td', { class: 'num' }, x.puesto), conGrupo ? h('td', null, x.grupo) : null, h('td', { class: 'num' }, x.n), h('td', null, x.nombre),
-                h('td', { class: 'num' }, `${x.desde} ${coma(valorFr_(x.antes), 2)}`), h('td', { class: 'num' }, `${x.hasta} ${coma(valorFr_(x.despues), 2)}`),
-                h('td', { class: 'num' }, h('b', null, '+' + tx[i])), h('td', null, avisosCandidato(x, { perdidas: x.perdidas, completo: x.completo })))),
-            k === 0 ? 'En el P1 no hay periodo anterior para comparar.' : 'Nadie subió su promedio.');
-    };
-    const bloques = [selectorPeriodos(k, true, v => { E.periodoRec = v; pintar(); }, 'Reconocimientos de:'), criterios,
-        h('div', { class: 'tarjeta' }, h('h2', null, `Excelencia académica · grupo ${g.grupo} · ${nomK}`), tablaMejores(c.mejores, false),
-            h('p', { class: 'sub', style: 'margin:6px 0 0' }, 'S: Superior · A: Alto · Bs: Básico · Bj: Bajo (Art. 7.9.2). Sirven para que la comisión compare a quienes empatan.'))];
-    if (varios) bloques.push(h('div', { class: 'tarjeta' }, h('h2', null, k === 'ANIO' ? `Excelencia de excelencias · grado · ${E.grupos.length} grupos del archivo` : `Mejores del grado en el ${P[k]} · ${E.grupos.length} grupos del archivo`), tablaMejores(cg.mejores, true)));
-    bloques.push(h('div', { class: 'tarjeta' }, h('h2', null, `Esfuerzo personal · grupo ${g.grupo} · ${nomK}`), tablaEsfuerzo(c.esfuerzo, false)));
-    if (varios && k !== 0) bloques.push(h('div', { class: 'tarjeta' }, h('h2', null, `Esfuerzo personal · grado · ${nomK}`), tablaEsfuerzo(cg.esfuerzo, true)));
-    if (k === 'ANIO') bloques.push(h('div', { class: 'tarjeta' }, h('h2', null, 'Promoción anticipada'),
-        !c.aplicaPromocion ? h('p', { class: 'sub' }, 'No aplica: el Manual la prevé de primero a décimo.')
-            : c.promocion.length ? tablaSimple(['N.º', 'Estudiante', { t: 'Promedio', c: 'c' }], c.promocion.map(x => h('tr', null, h('td', { class: 'num' }, x.n), h('td', null, x.nombre), h('td', { class: 'num' }, coma(valorFr_(x.valor), 2)))), '')
-            : h('p', { class: 'sub', style: 'margin:0' }, 'Nadie del grupo tiene Superior en el PF de todas las asignaturas.')));
-    if (varios) {
+    let tarjeta;
+    if (tipo === 'CURSO') {
         const mc = mejorCurso(E.grupos, P, CONFIG, k), tx = textoPromedios(mc, 'valor');
-        bloques.push(h('div', { class: 'tarjeta' }, h('h2', null, `Mejor curso · ${nomK}`),
+        tarjeta = h('div', { class: 'tarjeta' }, h('h2', null, `Mejor curso · ${nomK}`),
             tablaSimple(['Puesto', 'Grupo', { t: 'Promedio del grupo', c: 'c' }, { t: 'Sin asignaturas perdidas', c: 'c' }],
-                mc.map((x, i) => h('tr', null, h('td', { class: 'num' }, x.puesto + (x.empate ? ' (empate)' : '')), h('td', null, h('b', null, x.grupo)), h('td', { class: 'num' }, tx[i]), h('td', { class: 'num' }, pct(x.sinPerdidas, x.n)))), ''),
-            h('p', { class: 'sub', style: 'margin:6px 0 0' }, 'Promedio de los promedios de sus estudiantes. El Manual pide elegirlo «a nivel académico y convivencial» (Art. 2.6.1): la convivencia la valora la comisión.')));
+                mc.map((x, i) => h('tr', null, h('td', { class: 'num' }, x.puesto + (x.empate ? ' (empate)' : '')), h('td', null, h('b', null, x.grupo)), h('td', { class: 'num' }, tx[i]), h('td', { class: 'num' }, pct(x.sinPerdidas, x.n)))), ''));
+    } else {
+        const c = candidatos(grado ? E.grupos : [g], P, CONFIG, k, top), lista = tipo === 'EXCELENCIA' ? c.mejores : c.esfuerzo, tx = textoPromedios(lista, 'valor');
+        const titulo2 = `${tipo === 'EXCELENCIA' ? 'Excelencia académica' : 'Esfuerzo personal'} · ${grado ? 'grado' : 'grupo ' + g.grupo} · ${nomK}`;
+        const clic = x => grado ? null : { class: 'clic', onclick: () => abrirFicha(x.n) };
+        if (tipo === 'EXCELENCIA') tarjeta = h('div', { class: 'tarjeta' }, h('h2', null, titulo2),
+            tablaSimple(['Puesto'].concat(grado ? ['Grupo'] : [], ['N.º', 'Estudiante', { t: 'Promedio', c: 'c' }, 'Desempeños (asignaturas)', { t: 'Nota más baja', c: 'c' }],
+                k === 'ANIO' ? [{ t: 'Último periodo', c: 'c' }] : [], ['Avisos']),
+                lista.map((x, i) => h('tr', clic(x), h('td', { class: 'num' }, x.puesto), grado ? h('td', null, x.grupo) : null, h('td', { class: 'num' }, x.n), h('td', null, x.nombre),
+                    h('td', { class: 'num' }, h('b', null, tx[i])), h('td', null, cuentaDesemp(x.valor.cuenta)), h('td', { class: 'num' }, f100(x.valor.minimo)),
+                    k === 'ANIO' ? h('td', { class: 'num' }, x.ultimo ? `${x.ultimo.periodo} ${coma(valorFr_(x.ultimo), 2)}` : '—') : null,
+                    h('td', null, avisosCandidato(x, x.valor)))), 'Nadie tiene notas en este periodo.'),
+            h('p', { class: 'sub', style: 'margin:6px 0 0' }, 'S: Superior · A: Alto · Bs: Básico · Bj: Bajo (Art. 7.9.2). Sirven para que la comisión compare a quienes empatan.'));
+        else tarjeta = h('div', { class: 'tarjeta' }, h('h2', null, titulo2),
+            tablaSimple(['Puesto'].concat(grado ? ['Grupo'] : [], ['N.º', 'Estudiante', { t: 'Antes', c: 'c' }, { t: 'Después', c: 'c' }, { t: 'Subió', c: 'c' }, 'Avisos']),
+                lista.map((x, i) => h('tr', clic(x), h('td', { class: 'num' }, x.puesto), grado ? h('td', null, x.grupo) : null, h('td', { class: 'num' }, x.n), h('td', null, x.nombre),
+                    h('td', { class: 'num' }, `${x.desde} ${coma(valorFr_(x.antes), 2)}`), h('td', { class: 'num' }, `${x.hasta} ${coma(valorFr_(x.despues), 2)}`),
+                    h('td', { class: 'num' }, h('b', null, '+' + tx[i])), h('td', null, avisosCandidato(x, { perdidas: x.perdidas, completo: x.completo })))),
+                k === 0 ? 'En el P1 no hay periodo anterior para comparar: elija P2, P3, P4 o el año.' : 'Nadie subió su promedio.'));
     }
-    return h('div', null, bloques);
+    return h('div', null, filtros, tarjeta, criterio);
 }
 
 /* ── Alertas ───────────────────────────────────────────────────────── */
