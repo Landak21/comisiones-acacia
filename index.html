@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  SIS-MEDIA-COMISIONES-APP · V1.0 · 18 de noviembre de 2026
+  SIS-MEDIA-COMISIONES-APP · V1.1 · 18 de noviembre de 2026
   Consolidado para las comisiones de evaluación y promoción · Ciclo V · Colegio Acacia II IED
   Autor: Eliot Manrique · Docente de Educación Media. Se publica como index.html (GitHub Pages).
   Qué hace: el director de grupo carga el consolidado de notas de Apoyo Escolar (.xlsx) y ve su grupo:
@@ -9,14 +9,15 @@
   Reglas: Manual de Convivencia, Arts. 7.3.1 (promedio de los 4 periodos), 7.3.3 (3 o más perdidas)
   y 7.10.2 (prueba de suficiencia). Redondeo normal a una décima (decisión del 18/11/2026).
   Sigue NOR-MEDIA-ESTANDAR-SCRIPTS: lo único que se edita es la sección 1 (AJUSTES), justo abajo.
-  Novedades V1.0: crédito del autor; casillas y listas siempre claras (no se oscurecen con el modo oscuro).
+  Novedades V1.1: pestaña «Cuadro para la comisión»: genera las columnas del periodo para el seguimiento de
+  comisiones (Teams) en Excel y con botones para copiar cada columna. V1.0: crédito del autor; casillas claras.
 -->
 <html lang="es">
 <head>
     <!-- ═══════════════ 1. AJUSTES (lo único que se edita a mano) ═══════════════ -->
     <script>
         const CONFIG = Object.freeze({
-            VERSION: '1.0',                              // versión de este archivo (dos números)
+            VERSION: '1.1',                              // versión de este archivo (dos números)
             CODIGO_SIS: 'SIS-MEDIA-COMISIONES-APP',
             PERIODOS: ['P1', 'P2', 'P3', 'P4'],          // periodos que promedian (Art. 7.3.1)
             MINIMO10: 30,                                // nota mínima para aprobar, en décimas (3,0)
@@ -183,6 +184,14 @@
             .t-ficha .col-res { display: none; }
             .res-movil { display: block; }
         }
+        .pasos { margin: 0; padding-left: 20px; font-size: 14px; }
+        .pasos li { margin: 4px 0; }
+        th .copiar { display: block; margin: 6px auto 0; font-weight: 700; }
+        .t-cuadro td { font-size: 13px; }
+        .t-cuadro td:nth-child(2) { min-width: 190px; }
+        .t-cuadro td:nth-child(3), .t-cuadro td:nth-child(5) { min-width: 200px; }
+        .t-cuadro th { white-space: normal; min-width: 70px; vertical-align: bottom; text-align: center; position: static; }
+        .notificacion { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--tinta); color: #fff; padding: 10px 16px; border-radius: 20px; font-size: 14px; z-index: 80; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
         footer { max-width: 1180px; margin: 10px auto 30px; padding: 0 16px; font-size: 12px; color: var(--gris); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     </style>
 </head>
@@ -536,6 +545,165 @@ function evaluarGrupo(g, periodos, cfg, simulaciones) {
 }
 
 
+/* ════════════════════════════════════════════════════════════════════
+ *  4.5 CUADRO DEL PERIODO PARA LA COMISIÓN
+ *  Las columnas que el director llenaba a mano en el seguimiento de comisiones:
+ *  - todos los periodos: asignaturas perdidas en el periodo (nota < 3,0), con su nota, y cuántas;
+ *  - desde el P3: asignaturas en pérdida para el año (promedio de P1 hasta el periodo, redondeo normal);
+ *  - en el P4: pruebas de suficiencia (1 o 2 perdidas) y resultado (Art. 7.3.3).
+ *  Formato de las listas: «(3) Física 2,5; Química 2,8; Lengua castellana 2,1».
+ * ══════════════════════════════════════════════════════════════════ */
+const TILDES_ = { ingles: 'inglés', tecnologia: 'tecnología', trigonometria: 'trigonometría', fisica: 'física', quimica: 'química', informatica: 'informática',
+    etica: 'ética', filosofia: 'filosofía', educacion: 'educación', economia: 'economía', economicas: 'económicas', politicas: 'políticas', matematicas: 'matemáticas',
+    biologia: 'biología', religion: 'religión', estadistica: 'estadística', geometria: 'geometría', musica: 'música', artistica: 'artística', calculo: 'cálculo' };
+/** «INGLES» → «Inglés»: minúsculas, primera mayúscula y las tildes que el sistema omite. */
+function tildes_(a) {
+    const t = String(a).toLowerCase().replace(/\s+/g, ' ').trim().replace(/[a-záéíóúñü]+/g, w => TILDES_[w] || w);
+    return t.charAt(0).toUpperCase() + t.slice(1);
+}
+const nombreCorto_ = a => tildes_(a).split(',')[0].trim();
+const notaTxt_ = c => (c % 10 === 0 ? (c / 100).toFixed(1) : (c / 100).toFixed(2)).replace('.', ',');
+
+/** Último periodo con alguna nota en el grupo (índice 0–3), o −1. */
+function periodoDetectado(g, periodos) {
+    for (let k = periodos.length - 1; k >= 0; k--)
+        if (g.estudiantes.some(e => Object.values(e.notas).some(n => n.periodos[periodos[k]] !== null && n.periodos[periodos[k]] !== undefined))) return k;
+    return -1;
+}
+
+function lista_(items) { return items.length ? `(${items.length}) ` + items.join('; ') : 'Ninguna'; }
+
+/** Devuelve { titulo, columnas: [{ id, titulo, ancho, num }], filas: [ { n, nombre, valores: {id: texto|número} } ] }. */
+function cuadroPeriodo(g, periodos, k, cfg) {
+    const p = periodos[k], hasta = periodos.slice(0, k + 1), minimo = cfg.MINIMO10 * 10;
+    const cols = [
+        { id: 'n', titulo: 'N.º', ancho: 6, num: true },
+        { id: 'nombre', titulo: 'Estudiante', ancho: 36 },
+        { id: 'perdP', titulo: `Asignaturas perdidas en el ${p} (nota)`, ancho: 52 },
+        { id: 'numP', titulo: `Número de asignaturas perdidas en el ${p}`, ancho: 14, num: true }
+    ];
+    if (k >= 2) cols.push(
+        { id: 'perdA', titulo: `Asignaturas en pérdida para el año (promedio ${hasta[0]}–${p})`, ancho: 52 },
+        { id: 'numA', titulo: 'Número de asignaturas en pérdida para el año', ancho: 14, num: true });
+    if (k === periodos.length - 1) cols.push(
+        { id: 'suf1', titulo: 'Prueba de suficiencia 1', ancho: 22 },
+        { id: 'suf2', titulo: 'Prueba de suficiencia 2', ancho: 22 },
+        { id: 'res', titulo: 'Resultado (Art. 7.3.3)', ancho: 18 });
+    cols.push({ id: 'obs', titulo: 'Aviso del sistema', ancho: 40 });
+
+    const filas = g.estudiantes.map(e => {
+        const v = { n: e.n, nombre: e.nombre };
+        const perdP = [], sinNota = [], perdA = [];
+        g.asignaturas.forEach(a => {
+            const notas = e.notas[a].periodos, c = notas[p];
+            if (c === null || c === undefined) sinNota.push(nombreCorto_(a));
+            else if (c < minimo) perdP.push(`${nombreCorto_(a)} ${notaTxt_(c)}`);
+            if (k >= 2) {
+                const r = pf10_(notas, hasta);
+                if (r.pf10 !== null && r.pf10 < cfg.MINIMO10) perdA.push({ a: nombreCorto_(a), txt: `${nombreCorto_(a)} ${(r.pf10 / 10).toFixed(1).replace('.', ',')}` });
+            }
+        });
+        v.perdP = lista_(perdP); v.numP = perdP.length;
+        if (k >= 2) { v.perdA = lista_(perdA.map(x => x.txt)); v.numA = perdA.length; }
+        if (k === periodos.length - 1) {
+            const s = perdA.length >= 1 && perdA.length <= cfg.MAX_SUFICIENCIAS;
+            v.suf1 = s ? perdA[0].a : ''; v.suf2 = s && perdA[1] ? perdA[1].a : '';
+            v.res = !perdA.length ? 'APRUEBA' : s ? 'SUFICIENCIA' : 'NO PROMOVIDO';
+        }
+        v.obs = sinNota.length ? `Sin nota del ${p} en: ${sinNota.join(', ')}` : '';
+        return v;
+    });
+    return { titulo: `Grupo ${g.grupo} · ${p}`, periodo: p, columnas: cols, filas };
+}
+
+/* ── Excel (.xlsx) sin librerías: XML de Office empacado en un ZIP sin compresión ── */
+const TABLA_CRC_ = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let i = 0; i < 8; i++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32_(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = TABLA_CRC_[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+
+function zipSinCompresion_(archivos) {
+    const enc = new TextEncoder(), partes = [], central = [];
+    let pos = 0;
+    archivos.forEach(f => {
+        const nombre = enc.encode(f.nombre), datos = typeof f.datos === 'string' ? enc.encode(f.datos) : f.datos, crc = crc32_(datos);
+        const loc = new DataView(new ArrayBuffer(30));
+        loc.setUint32(0, 0x04034b50, true); loc.setUint16(4, 20, true); loc.setUint16(6, 0x0800, true); loc.setUint16(8, 0, true);
+        loc.setUint32(14, crc, true); loc.setUint32(18, datos.length, true); loc.setUint32(22, datos.length, true); loc.setUint16(26, nombre.length, true);
+        const cen = new DataView(new ArrayBuffer(46));
+        cen.setUint32(0, 0x02014b50, true); cen.setUint16(4, 20, true); cen.setUint16(6, 20, true); cen.setUint16(8, 0x0800, true);
+        cen.setUint32(16, crc, true); cen.setUint32(20, datos.length, true); cen.setUint32(24, datos.length, true); cen.setUint16(28, nombre.length, true);
+        cen.setUint32(42, pos, true);
+        partes.push(new Uint8Array(loc.buffer), nombre, datos);
+        central.push(new Uint8Array(cen.buffer), nombre);
+        pos += 30 + nombre.length + datos.length;
+    });
+    const tamCentral = central.reduce((s, x) => s + x.length, 0);
+    const fin = new DataView(new ArrayBuffer(22));
+    fin.setUint32(0, 0x06054b50, true); fin.setUint16(8, archivos.length, true); fin.setUint16(10, archivos.length, true);
+    fin.setUint32(12, tamCentral, true); fin.setUint32(16, pos, true);
+    const todo = [...partes, ...central, new Uint8Array(fin.buffer)], salida = new Uint8Array(todo.reduce((s, x) => s + x.length, 0));
+    let o = 0; todo.forEach(x => { salida.set(x, o); o += x.length; });
+    return salida;
+}
+
+const xmlEsc_ = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+function letraCol_(i) { let s = ''; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+
+/** Libro con una hoja: fila 1 título, fila 2 aviso, fila 4 encabezados, desde la fila 5 los estudiantes. */
+function crearXlsxCuadro(cuadro, encabezado) {
+    const cols = cuadro.columnas, filasXml = [];
+    const celda = (ref, v, estilo) => (typeof v === 'number')
+        ? `<c r="${ref}" s="${estilo}"><v>${v}</v></c>`
+        : `<c r="${ref}" s="${estilo}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc_(v)}</t></is></c>`;
+    filasXml.push(`<row r="1">${celda('A1', encabezado.titulo, 4)}</row>`);
+    filasXml.push(`<row r="2">${celda('A2', encabezado.aviso, 5)}</row>`);
+    filasXml.push(`<row r="4" ht="48" customHeight="1">${cols.map((c, i) => celda(letraCol_(i) + '4', c.titulo, 1)).join('')}</row>`);
+    cuadro.filas.forEach((f, j) => {
+        const r = j + 5;
+        filasXml.push(`<row r="${r}">${cols.map((c, i) => celda(letraCol_(i) + r, f[c.id] === undefined ? '' : f[c.id], c.num ? 3 : 2)).join('')}</row>`);
+    });
+    const ultima = letraCol_(cols.length - 1);
+    const hoja = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
+<sheetViews><sheetView workbookViewId="0"><pane xSplit="2" ySplit="4" topLeftCell="C5" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols>${cols.map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${c.ancho}" customWidth="1"/>`).join('')}</cols>
+<sheetData>${filasXml.join('')}</sheetData>
+<autoFilter ref="A4:${ultima}${cuadro.filas.length + 4}"/>
+<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>
+<pageSetup orientation="landscape" paperSize="1" fitToWidth="1" fitToHeight="0"/>
+</worksheet>`;
+    const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="4"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FF5C1027"/><name val="Arial"/></font><font><b/><sz val="13"/><color rgb="FF861A3A"/><name val="Arial"/></font><font><i/><sz val="9"/><color rgb="FF555B63"/><name val="Arial"/></font></fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF6E9EE"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFB9BEC5"/></left><right style="thin"><color rgb="FFB9BEC5"/></right><top style="thin"><color rgb="FFB9BEC5"/></top><bottom style="thin"><color rgb="FFB9BEC5"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="6">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+    const nombreHoja = xmlEsc_(('Cuadro ' + cuadro.periodo).slice(0, 31));
+    return zipSinCompresion_([
+        { nombre: '[Content_Types].xml', datos: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+        { nombre: '_rels/.rels', datos: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+        { nombre: 'xl/workbook.xml', datos: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${nombreHoja}" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${nombreHoja}'!$A$4:$${ultima}$${cuadro.filas.length + 4}</definedName></definedNames></workbook>` },
+        { nombre: 'xl/_rels/workbook.xml.rels', datos: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+        { nombre: 'xl/styles.xml', datos: estilos },
+        { nombre: 'xl/worksheets/sheet1.xml', datos: hoja }
+    ]);
+}
+
 
 /* ════════════════════════════════════════════════════════════════════
  *  4.4 PANTALLA
@@ -544,7 +712,7 @@ const P = CONFIG.PERIODOS;
 const $ = s => document.querySelector(s);
 const E = {               // estado de la página: solo en memoria
     grupos: [], gi: -1, tab: 'resumen', filtro: 'TODOS', orden: 'estado', busqueda: '',
-    sim: {}, fichaN: null, simular: false, asigAbierta: null, periodoAbierto: null
+    sim: {}, fichaN: null, simular: false, asigAbierta: null, periodoAbierto: null, periodoCuadro: null
 };
 
 /** h('div', {class:'x', onclick: f}, 'texto', nodo…): todo texto entra como texto, nunca como HTML. */
@@ -568,10 +736,7 @@ const pct = (a, b) => b ? `${a} de ${b} (${coma(100 * a / b, 1)} %)` : `${a} de 
 const pctCorto = (a, b) => b ? coma(100 * a / b, 1) + ' %' : '—';
 const suma = d => coma(d / 10, 1);   // lo que falta sumar entre los periodos, en unidades de nota
 const nombreAsig = a => a.charAt(0) + a.slice(1).toLowerCase().replace(/\b(y|de|del|la|el)\b/g, m => m);
-function titulo(a) {   // «CIENCIAS SOCIALES, ECONÓMICAS Y POLÍTICAS» → «Ciencias sociales, económicas y políticas»
-    const t = a.toLowerCase();
-    return t.charAt(0).toUpperCase() + t.slice(1);
-}
+const titulo = a => tildes_(a);   // «CIENCIAS SOCIALES, ECONÓMICAS Y POLÍTICAS» → «Ciencias sociales, económicas y políticas»
 const corto = a => { const t = titulo(a).split(',')[0]; return t.length > 26 ? t.slice(0, 24) + '…' : t; };
 const claseEstado = e => e === 'NO PROMOVIDO' ? 'NO' : e === 'SIN NOTAS' ? 'SIN' : e;
 const chipEstado = e => h('span', { class: 'estado ' + claseEstado(e) }, e);
@@ -623,7 +788,7 @@ function mostrarGrupos(nombreArchivo) {
 }
 
 function elegirGrupo(i) {
-    E.gi = i; E.tab = 'resumen'; E.filtro = 'TODOS'; E.busqueda = ''; E.asigAbierta = null; E.periodoAbierto = null;
+    E.gi = i; E.tab = 'resumen'; E.periodoCuadro = null; E.filtro = 'TODOS'; E.busqueda = ''; E.asigAbierta = null; E.periodoAbierto = null;
     $('#vistaCarga').hidden = true; $('#vistaGrupos').hidden = true; $('#vistaGrupo').hidden = false;
     const sel = $('#selGrupo');
     sel.replaceChildren(...E.grupos.map((g, k) => h('option', { value: k }, 'Grupo ' + g.grupo)));
@@ -646,10 +811,10 @@ function pintar() {
     $('#subGrupo').textContent = [g.director ? 'Director(a) de grupo: ' + nombrePropio(g.director) : '', g.jornada ? 'Jornada ' + g.jornada.toLowerCase() : '',
         g.anio ? 'Año ' + g.anio : '', `${g.estudiantes.length} estudiantes`].filter(Boolean).join(' · ');
     const nAv = R.avisos.length + (g.tablasIgnoradas.length ? 1 : 0);
-    const tabs = [['resumen', 'Resumen'], ['estudiantes', 'Estudiantes'], ['asignaturas', 'Asignaturas'], ['periodos', 'Periodos'], ['avisos', 'Avisos']];
+    const tabs = [['resumen', 'Resumen'], ['estudiantes', 'Estudiantes'], ['asignaturas', 'Asignaturas'], ['periodos', 'Periodos'], ['cuadro', 'Cuadro para la comisión'], ['avisos', 'Avisos']];
     $('#pestanas').replaceChildren(...tabs.map(([k, t]) => h('button', { class: 'pestana' + (E.tab === k ? ' activa' : ''), onclick: () => { E.tab = k; pintar(); } },
         t, k === 'avisos' && nAv ? h('span', { class: 'contador' }, nAv) : null)));
-    const vistas = { resumen: vistaResumen, estudiantes: vistaEstudiantes, asignaturas: vistaAsignaturas, periodos: vistaPeriodos, avisos: vistaAvisos };
+    const vistas = { resumen: vistaResumen, estudiantes: vistaEstudiantes, asignaturas: vistaAsignaturas, periodos: vistaPeriodos, cuadro: vistaCuadro, avisos: vistaAvisos };
     $('#panel').replaceChildren(vistas[E.tab](g, R));
 }
 
@@ -815,6 +980,65 @@ function vistaAvisos(g, R) {
         : a.tipo === 'SIN_NOTAS' ? `n.º ${a.n} · ${titulo(a.asig)}: sin ninguna nota.` : a.tipo)));
     bloques.push(h('div', { class: 'tarjeta' }, h('h2', null, 'Qué no se tuvo en cuenta'), h('ul', { class: 'hallazgos' }, extra)));
     return h('div', null, bloques);
+}
+
+/* ── Cuadro para la comisión (seguimiento en Teams) ────────────────── */
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const hoyTexto = () => { const d = new Date(); return `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`; };
+function notificar(t) {
+    const n = h('div', { class: 'notificacion', role: 'status' }, t);
+    document.body.append(n); setTimeout(() => n.remove(), 2600);
+}
+async function copiarTexto(texto, aviso) {
+    try { await navigator.clipboard.writeText(texto); notificar(aviso); }
+    catch (_) {
+        const ta = h('textarea', { style: 'position:fixed;left:-9999px' }); ta.value = texto; document.body.append(ta); ta.select();
+        let ok = false; try { ok = document.execCommand('copy'); } catch (__) {}
+        ta.remove(); notificar(ok ? aviso : 'No se pudo copiar: use «Descargar Excel».');
+    }
+}
+function descargarBytes(bytes, nombre) {
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = h('a', { href: url, download: nombre }); document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    notificar('Descargando ' + nombre);
+}
+const celdaTexto = v => v === undefined || v === null ? '' : String(v).replace(/[\t\r\n]+/g, ' ');
+
+function vistaCuadro(g, R) {
+    const det = periodoDetectado(g, P);
+    if (E.periodoCuadro === null) E.periodoCuadro = Math.max(det, 0);
+    const k = E.periodoCuadro, q = cuadroPeriodo(g, P, k, CONFIG);
+    const encabezado = {
+        titulo: `Cuadro para la comisión · Grupo ${g.grupo} · ${P[k]}` + (g.director ? ` · Director(a): ${nombrePropio(g.director)}` : ''),
+        aviso: `Generado el ${hoyTexto()} desde el consolidado de Apoyo Escolar (${CONFIG.CODIGO_SIS} V${CONFIG.VERSION}, elaborado por Eliot Manrique). ` +
+            'Orden: número de lista de Apoyo Escolar. Datos de menores de edad: tratamiento conforme a la Ley 1581 de 2012.'
+    };
+    const selector = h('div', { class: 'controles' }, h('span', { class: 'sub' }, 'Periodo de la comisión:'),
+        P.map((p, i) => h('button', { class: 'filtro' + (i === k ? ' activo' : ''), onclick: () => { E.periodoCuadro = i; pintar(); } }, p)));
+    const intro = h('div', { class: 'tarjeta' }, h('h2', null, 'Cuadro para la comisión'),
+        h('p', { style: 'margin:0 0 8px' }, det >= 0 ? [`Detecté el `, h('b', null, P[det]), `: es el último periodo con notas en el archivo. Si la comisión es de otro periodo, cámbielo.`] : 'El archivo no trae notas de ningún periodo.'),
+        selector,
+        h('div', { class: 'controles' }, h('button', { class: 'btn lleno', onclick: () => descargarBytes(crearXlsxCuadro(q, encabezado), `CUADRO-COMISION-GRUPO${g.grupo}-${P[k]}.xlsx`) }, 'Descargar Excel del cuadro'),
+            h('span', { class: 'sub' }, k === P.length - 1 ? 'Incluye perdidas del P4, perdidas del año, pruebas de suficiencia y resultado.' : k >= 2 ? `Incluye perdidas del ${P[k]} y perdidas para el año hasta el ${P[k]}.` : `Incluye las perdidas del ${P[k]}.`)));
+    const pasos = h('div', { class: 'tarjeta' }, h('h2', null, 'Cómo pasarlo al cuadro de Teams'),
+        h('ol', { class: 'pasos' },
+            h('li', null, 'Abra en Teams el cuadro de seguimiento de comisiones, en la hoja de su grupo.'),
+            h('li', null, 'Pulse «Copiar» en una columna de abajo y péguela en la columna que corresponde, haciendo clic en la fila del ', h('b', null, 'primer estudiante'), '. Repita con cada columna.'),
+            h('li', null, 'Revise que los nombres coincidan. El orden es el número de lista de Apoyo Escolar; si su cuadro tiene retirados o estudiantes agregados en otras filas, pegue por partes.'),
+            h('li', null, 'Lo demás sigue siendo suyo: estudiante nuevo, reiniciante, aula de apoyo, Media, observaciones y decisiones.')),
+        h('p', { class: 'nota-legal', style: 'margin:8px 0 0' }, 'El número del grupo en Apoyo Escolar puede no coincidir con el del cuadro de Teams. Guíese por los nombres.'));
+    const datos = q.columnas.filter(c => c.id !== 'n' && c.id !== 'nombre');
+    const tabla = h('div', { class: 'tabla-caja' }, h('table', { class: 't-cuadro' },
+        h('thead', null, h('tr', null, q.columnas.map(c => h('th', null, c.titulo,
+            c.id === 'n' ? null : h('button', { class: 'btn chico copiar', title: 'Copiar la columna sin el título',
+                onclick: () => copiarTexto(q.filas.map(f => celdaTexto(f[c.id])).join('\n'), `Copiada «${c.titulo}»: ${q.filas.length} filas`) }, 'Copiar'))))),
+        h('tbody', null, q.filas.map(f => h('tr', null, q.columnas.map(c => h('td', { class: c.num ? 'num' : '' + (c.id === 'res' && f.res === 'NO PROMOVIDO' ? ' baja' : '') },
+            c.id === 'res' && f.res ? chipEstado(f.res) : celdaTexto(f[c.id]))))))));
+    const todo = h('div', { class: 'controles', style: 'margin-top:10px' },
+        h('button', { class: 'btn', onclick: () => copiarTexto(q.filas.map(f => datos.map(c => celdaTexto(f[c.id])).join('\t')).join('\n'), `Copiadas ${datos.length} columnas juntas: ${q.filas.length} filas`) }, 'Copiar todas las columnas calculadas juntas'),
+        h('span', { class: 'sub' }, 'Solo si en su cuadro esas columnas están seguidas y en este mismo orden.'));
+    return h('div', null, intro, pasos, tabla, todo);
 }
 
 /* ── Ficha del estudiante y simulador ──────────────────────────────── */
